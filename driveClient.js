@@ -1,7 +1,7 @@
 // driveClient.js
 const { google } = require("googleapis");
 
-function getAuthClient() {
+async function getAuthClient() {
     const saJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
     if (!saJson) {
         throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is not set");
@@ -14,20 +14,19 @@ function getAuthClient() {
         "https://www.googleapis.com/auth/spreadsheets.readonly",
     ];
 
-    const auth = new google.auth.JWT(
-        credentials.client_email,
-        null,
-        credentials.private_key,
-        scopes
-    );
+    const auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes,
+    });
 
-    return auth;
+    const client = await auth.getClient();
+    return client;
 }
 
 // Search for a spreadsheet by its exact title (name)
 async function findSpreadsheetByTitle(title) {
-    const auth = getAuthClient();
-    const drive = google.drive({ version: "v3", auth });
+    const authClient = await getAuthClient();
+    const drive = google.drive({ version: "v3", auth: authClient });
 
     const res = await drive.files.list({
         q: `name = '${title.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
@@ -44,8 +43,8 @@ async function findSpreadsheetByTitle(title) {
 
 // Get all values from first sheet (you can refine later)
 async function getSheetValues(spreadsheetId) {
-    const auth = getAuthClient();
-    const sheets = google.sheets({ version: "v4", auth });
+    const authClient = await getAuthClient();
+    const sheets = google.sheets({ version: "v4", auth: authClient });
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId,

@@ -104,8 +104,10 @@ app.get("/test-google", async (req, res) => {
         }
 
         const keys = Object.keys(creds);
-        const hasPrivateKey = typeof creds.private_key === "string" && creds.private_key.length > 0;
-        const hasClientEmail = typeof creds.client_email === "string" && creds.client_email.length > 0;
+        const hasPrivateKey =
+            typeof creds.private_key === "string" && creds.private_key.length > 0;
+        const hasClientEmail =
+            typeof creds.client_email === "string" && creds.client_email.length > 0;
 
         console.log("Service account keys present:", keys);
         console.log("Has private_key?", hasPrivateKey);
@@ -114,19 +116,35 @@ app.get("/test-google", async (req, res) => {
         if (!hasPrivateKey) {
             return res
                 .status(500)
-                .send("Parsed JSON but it does NOT contain a valid private_key field.");
+                .send(
+                    "Parsed JSON but it does NOT contain a valid private_key field."
+                );
         }
 
-        const auth = new google.auth.JWT(
-            creds.client_email,
-            null,
-            creds.private_key,
-            ["https://www.googleapis.com/auth/drive.readonly"]
-        );
+        const scopes = [
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+        ];
 
-        await auth.authorize();
+        // ✅ Use GoogleAuth instead of JWT directly
+        const auth = new google.auth.GoogleAuth({
+            credentials: creds,
+            scopes,
+        });
 
-        return res.send("Google Auth SUCCESS!");
+        const client = await auth.getClient();
+        // Just to confirm it really works, make a simple Drive call:
+        const drive = google.drive({ version: "v3", auth: client });
+
+        // List 1 file (if accessible)
+        const resp = await drive.files.list({
+            pageSize: 1,
+            fields: "files(id, name)",
+        });
+
+        console.log("Sample Drive list result:", resp.data.files);
+
+        return res.send("Google Auth SUCCESS! I can talk to Drive ✅");
     } catch (err) {
         console.error(err);
         return res.send("Google Auth FAILED: " + err.message);
