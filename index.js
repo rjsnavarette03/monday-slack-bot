@@ -65,6 +65,138 @@ app.get("/auth/google/callback", async (req, res) => {
     }
 });
 
+// Slack Events endpoint (for DMs / mentions)
+app.post("/slack/events", async (req, res) => {
+    const body = req.body;
+
+    // 1) URL verification
+    if (body.type === "url_verification") {
+        return res.json({ challenge: body.challenge });
+    }
+
+    // 2) Event callbacks
+    if (body.type === "event_callback") {
+        const event = body.event;
+
+        // Ignore bot messages (avoid loops)
+        if (event.subtype === "bot_message") {
+            return res.sendStatus(200);
+        }
+
+        // We only care about DMs to the bot or @mentions for now
+        const isDM = event.channel_type === "im";
+        const isMention = event.type === "app_mention";
+
+        if (!isDM && !isMention) {
+            return res.sendStatus(200);
+        }
+
+        const userId = event.user;
+        const channelId = event.channel;
+        let text = event.text || "";
+
+        // Remove the @mention from text (for channel messages)
+        if (isMention) {
+            const botUserId = body.authorizations?.[0]?.user_id;
+            if (botUserId) {
+                const mentionTag = `<@${botUserId}>`;
+                text = text.replace(mentionTag, "").trim();
+            }
+        }
+
+        // Acknowledge immediately to Slack
+        res.sendStatus(200);
+
+        // Now run the same agent logic you use for slash commands,
+        // but reply with chat.postMessage instead of response_url.
+        try {
+            let history = getHistory(userId);
+            appendToHistory(userId, { role: "user", content: text });
+
+            let messages = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
+
+            while (true) {
+                const result = await runAgent(messages);
+                const msg = result.choices[0].message;
+
+                // Final answer
+                if (!msg.tool_calls?.length) {
+                    // unwrap JSON like {"text":"..."} if model uses respond tool
+                    let finalContent = msg.content;
+                    try {
+                        const parsed = JSON.parse(finalContent);
+                        if (parsed?.text) finalContent = parsed.text;
+                    } catch (_) { }
+
+                    appendToHistory(userId, { role: "assistant", content: finalContent });
+
+                    await axios.post(
+                        "https://slack.com/api/chat.postMessage",
+                        {
+                            channel: channelId,
+                            text: finalContent,
+                        },
+                        {
+                            headers: {
+                                Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+                                "Content-Type": "application/json",
+                            },
+                        }
+                    );
+
+                    break;
+                }
+
+                // Tool call
+                const toolCall = msg.tool_calls[0];
+                const toolName = toolCall.function?.name;
+                let args = {};
+                try {
+                    args = toolCall.function.arguments
+                        ? JSON.parse(toolCall.function.arguments)
+                        : {};
+                } catch (_) { }
+
+                const toolResult = await handleToolCall({
+                    name: toolName,
+                    arguments: args,
+                });
+
+                messages.push({
+                    role: "assistant",
+                    tool_call_id: toolCall.id,
+                    content: JSON.stringify(toolResult),
+                });
+
+                appendToHistory(userId, {
+                    role: "assistant",
+                    content: `Used tool: ${toolName}.`,
+                });
+            }
+        } catch (err) {
+            console.error("DM/mention agent error:", err);
+            await axios.post(
+                "https://slack.com/api/chat.postMessage",
+                {
+                    channel: channelId,
+                    text: "❌ Error: " + err.message,
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+                        "Content-Type": "application/json",
+                    },
+                }
+            );
+        }
+
+        return;
+    }
+
+    // Fallback
+    res.sendStatus(200);
+});
+
 // Health check
 app.get("/", (req, res) => {
     res.send("Slack → Render backend is running ✅");
