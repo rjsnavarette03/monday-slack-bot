@@ -22,17 +22,15 @@ app.post("/slack/command", async (req, res) => {
     const userText = (req.body.text || "").trim();
     const userName = req.body.user_name || "there";
 
-    // 1) If it's your old monday.com 'analyze' command, keep behavior as-is
+    // 1) Monday analyze command - placeholder for now
     if (userText.startsWith("analyze")) {
-        // existing monday logic here if you still want it
         return res.json({
             response_type: "ephemeral",
             text: "Analyze command is currently disabled until Monday API is ready.",
         });
     }
 
-    // 2) New: Google Drive + OpenAI flow
-    // Expect something like: "In the spreadsheet titled 'MBO Leads & Ads Spend', what's yesterday ads spend?"
+    // 2) Google Drive flow (no OpenAI yet)
     const titleMatch = userText.match(/spreadsheet titled '([^']+)'/i);
     if (titleMatch) {
         const sheetTitle = titleMatch[1];
@@ -43,36 +41,39 @@ app.post("/slack/command", async (req, res) => {
             if (!file) {
                 return res.json({
                     response_type: "ephemeral",
-                    text: `❌ I couldn't find a spreadsheet in your Drive titled '${sheetTitle}'. Make sure it exists and is shared with the service account.`,
+                    text: `❌ I couldn't find a spreadsheet in Drive titled '${sheetTitle}'. Make sure it exists and is shared with the service account.`,
                 });
             }
 
-            // b) Get sheet values
+            // b) Get sheet values (just to confirm we can read it)
             const values = await getSheetValues(file.id);
+            const rowCount = values.length;
+            const colCount = values[0] ? values[0].length : 0;
 
-            if (!values.length) {
-                return res.json({
-                    response_type: "ephemeral",
-                    text: `I found '${file.name}' but it appears to be empty or has no data.`,
-                });
-            }
+            // Build a very small, safe summary
+            const headerRow = values[0] || [];
+            const headerPreview =
+                headerRow.length > 0
+                    ? headerRow.map((h) => `• ${h}`).join("\n")
+                    : "No headers (first row is empty).";
 
-            // c) Ask OpenAI to answer based on the sheet + original question
-            const aiAnswer = await answerFromSheet(userText, values);
+            const message =
+                `📄 *Sheet:* ${file.name}\n` +
+                `• ID: \`${file.id}\`\n` +
+                `• Rows: *${rowCount}*\n` +
+                `• Columns: *${colCount}*\n\n` +
+                `Here are the column headers I see:\n${headerPreview}`;
 
             return res.json({
                 response_type: "ephemeral",
-                text:
-                    `📄 *Sheet:* ${file.name}\n` +
-                    `Here’s what I found:\n\n` +
-                    aiAnswer,
+                text: message,
             });
         } catch (err) {
-            console.error("Error handling Drive/OpenAI question:", err);
+            console.error("Error handling Drive question:", err);
             return res.json({
                 response_type: "ephemeral",
                 text:
-                    "⚠️ Something went wrong while talking to Google Drive or OpenAI. Check the logs in Render.",
+                    "⚠️ Something went wrong while talking to Google Drive. Check the logs in Render.",
             });
         }
     }
