@@ -87,7 +87,35 @@ app.post("/slack/command", async (req, res) => {
 app.get("/test-google", async (req, res) => {
     try {
         const { google } = require("googleapis");
-        const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+
+        const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+        if (!raw) {
+            return res.status(500).send("GOOGLE_SERVICE_ACCOUNT_JSON is NOT set.");
+        }
+
+        let creds;
+        try {
+            creds = JSON.parse(raw);
+        } catch (e) {
+            console.error("JSON parse error:", e);
+            return res
+                .status(500)
+                .send("Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON as JSON.");
+        }
+
+        const keys = Object.keys(creds);
+        const hasPrivateKey = typeof creds.private_key === "string" && creds.private_key.length > 0;
+        const hasClientEmail = typeof creds.client_email === "string" && creds.client_email.length > 0;
+
+        console.log("Service account keys present:", keys);
+        console.log("Has private_key?", hasPrivateKey);
+        console.log("Has client_email?", hasClientEmail);
+
+        if (!hasPrivateKey) {
+            return res
+                .status(500)
+                .send("Parsed JSON but it does NOT contain a valid private_key field.");
+        }
 
         const auth = new google.auth.JWT(
             creds.client_email,
