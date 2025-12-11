@@ -1,5 +1,6 @@
 const express = require("express");
 const axios = require("axios");
+const { google } = require("googleapis");
 const { runAgent, SYSTEM_PROMPT } = require("./aiAgent");
 const { handleToolCall } = require("./toolHandlers");
 const { getHistory, appendToHistory } = require("./memoryStore");
@@ -10,6 +11,59 @@ const PORT = process.env.PORT || 3000;
 // Slack sends slash commands as x-www-form-urlencoded
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+function getOAuth2Client() {
+    const client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        process.env.GOOGLE_REDIRECT_URI
+    );
+    return client;
+}
+
+// Step 1: Start OAuth flow
+app.get("/auth/google", (req, res) => {
+    const oauth2Client = getOAuth2Client();
+
+    const scopes = [
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/documents.readonly"
+    ];
+
+    const url = oauth2Client.generateAuthUrl({
+        access_type: "offline",  // needed for refresh_token
+        prompt: "consent",       // force showing consent screen to ensure refresh_token
+        scope: scopes
+    });
+
+    res.redirect(url);
+});
+
+// Step 2: OAuth callback (Google redirects here)
+app.get("/auth/google/callback", async (req, res) => {
+    const code = req.query.code;
+    const oauth2Client = getOAuth2Client();
+
+    try {
+        const { tokens } = await oauth2Client.getToken(code);
+
+        console.log("🔑 Google OAuth tokens received:", tokens);
+
+        // IMPORTANT: refresh_token will be here the first time you consent.
+        if (tokens.refresh_token) {
+            console.log("✅ SAVE THIS REFRESH TOKEN IN RENDER ENV AS GOOGLE_REFRESH_TOKEN:");
+            console.log(tokens.refresh_token);
+        } else {
+            console.log("⚠️ No refresh_token returned. You may need to revoke access and try again with prompt=consent.");
+        }
+
+        res.send("Auth successful! Check your server logs for the refresh_token. You can close this page.");
+    } catch (err) {
+        console.error("Error during Google OAuth callback:", err);
+        res.status(500).send("Google OAuth error: " + err.message);
+    }
+});
 
 // Health check
 app.get("/", (req, res) => {

@@ -155,7 +155,7 @@ Sent via Slack `response_url`.
 ### 1. Clone repo
 
 ```bash
-git clone https://github.com/yourname/monday-slack-bot.git
+git clone https://github.com/rjsnavarette03/monday-slack-bot.git
 cd monday-slack-bot
 ```
 
