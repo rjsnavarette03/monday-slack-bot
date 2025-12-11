@@ -1,5 +1,7 @@
 const express = require("express");
 const { getBoardSummary } = require("./mondayClient");
+const { findSpreadsheetByTitle, getSheetValues } = require("./driveClient");
+const { answerFromSheet } = require("./openaiClient");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,48 +22,62 @@ app.post("/slack/command", async (req, res) => {
     const userText = (req.body.text || "").trim();
     const userName = req.body.user_name || "there";
 
-    // Command: /mondaybot analyze <boardId>
+    // 1) If it's your old monday.com 'analyze' command, keep behavior as-is
     if (userText.startsWith("analyze")) {
-        const parts = userText.split(/\s+/);
-        const boardId = parseInt(parts[1], 10);
+        // existing monday logic here if you still want it
+        return res.json({
+            response_type: "ephemeral",
+            text: "Analyze command is currently disabled until Monday API is ready.",
+        });
+    }
 
-        if (isNaN(boardId)) {
-            return res.json({
-                response_type: "ephemeral",
-                text: "Usage: `/mondaybot analyze <boardId>` (boardId must be a number).",
-            });
-        }
+    // 2) New: Google Drive + OpenAI flow
+    // Expect something like: "In the spreadsheet titled 'MBO Leads & Ads Spend', what's yesterday ads spend?"
+    const titleMatch = userText.match(/spreadsheet titled '([^']+)'/i);
+    if (titleMatch) {
+        const sheetTitle = titleMatch[1];
 
         try {
-            const summary = await getBoardSummary(boardId);
-
-            // If getBoardSummary returned a text property, it's an error/notice
-            if (summary.text) {
+            // a) Find the spreadsheet
+            const file = await findSpreadsheetByTitle(sheetTitle);
+            if (!file) {
                 return res.json({
                     response_type: "ephemeral",
-                    text: summary.text,
+                    text: `❌ I couldn't find a spreadsheet in your Drive titled '${sheetTitle}'. Make sure it exists and is shared with the service account.`,
                 });
             }
 
-            const message =
-                `📊 *Board:* ${summary.boardName} (ID: ${boardId})\n` +
-                `• Total items: *${summary.totalItems}*\n\n` +
-                `Here are a few example items:\n${summary.exampleItems}`;
+            // b) Get sheet values
+            const values = await getSheetValues(file.id);
+
+            if (!values.length) {
+                return res.json({
+                    response_type: "ephemeral",
+                    text: `I found '${file.name}' but it appears to be empty or has no data.`,
+                });
+            }
+
+            // c) Ask OpenAI to answer based on the sheet + original question
+            const aiAnswer = await answerFromSheet(userText, values);
 
             return res.json({
                 response_type: "ephemeral",
-                text: message,
+                text:
+                    `📄 *Sheet:* ${file.name}\n` +
+                    `Here’s what I found:\n\n` +
+                    aiAnswer,
             });
         } catch (err) {
-            console.error("Error in analyze command:", err);
+            console.error("Error handling Drive/OpenAI question:", err);
             return res.json({
                 response_type: "ephemeral",
-                text: "⚠️ There was an error talking to monday.com. Check the logs in Render.",
+                text:
+                    "⚠️ Something went wrong while talking to Google Drive or OpenAI. Check the logs in Render.",
             });
         }
     }
 
-    // Default: fallback echo
+    // 3) Fallback: simple echo
     return res.json({
         response_type: "ephemeral",
         text: `Got it, ${userName}. You said: "${userText}" 👌`,
