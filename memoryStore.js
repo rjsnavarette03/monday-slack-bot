@@ -1,4 +1,5 @@
 const memory = {};  // { userId: [messages] }
+let lastSearchResults = {};
 
 // Return last 10 messages only
 function getHistory(userId) {
@@ -20,8 +21,18 @@ function clearHistory(userId) {
     memory[userId] = [];
 }
 
+function setLastSearch(userId, files) {
+    lastSearchResults[userId] = files;
+}
+
+function getLastSearch(userId) {
+    return lastSearchResults[userId] || [];
+}
+
 module.exports = {
     getHistory,
     appendToHistory,
-    clearHistory
+    clearHistory,
+    setLastSearch,
+    getLastSearch
 };

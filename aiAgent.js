@@ -39,6 +39,23 @@ RULES:
 4. If a file is referenced, search for it first.
 5. If multiple files match a search, ask the user which one.
 6. Keep replies short and practical unless asked otherwise.
+
+When search_drive is used, you will receive a list of files with:
+- index
+- id
+- name
+- mimeType
+
+If the user replies with:
+- a number ("1", "2", etc)
+- a numbered choice ("1. MBO Leads...")
+- the file name ("MBO Leads & Ads Spend")
+
+THEN you MUST:
+1. Match that selection to the corresponding file object from the last search results.
+2. Use that file's id to call read_sheet or read_doc depending on mimeType.
+
+NEVER guess file IDs. ALWAYS use the IDs returned by search_drive.
 `;
 
 // Run the agent with tool calling

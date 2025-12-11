@@ -31,7 +31,14 @@ async function findInDrive(query) {
         pageSize: 10,
     });
 
-    return { files: res.data.files };
+    return {
+        files: res.data.files.map((f, index) => ({
+            index: index + 1,
+            id: f.id,
+            name: f.name,
+            mimeType: f.mimeType
+        }))
+    };
 }
 
 /*** READ SHEET ***/
