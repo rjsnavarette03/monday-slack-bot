@@ -101,11 +101,25 @@ app.post("/slack/command", async (req, res) => {
 
             // CASE 1 — No tools requested → final answer
             if (!msg.tool_calls?.length) {
-                appendToHistory(userId, { role: "assistant", content: msg.content });
+
+                // Clean up JSON-like assistant messages
+                let finalContent = msg.content;
+
+                try {
+                    const parsed = JSON.parse(finalContent);
+                    if (parsed?.text) {
+                        finalContent = parsed.text;
+                    }
+                } catch (_) {
+                    // It's fine — message was not JSON
+                }
+
+                // Store ONLY natural language responses in memory
+                appendToHistory(userId, { role: "assistant", content: finalContent });
 
                 await axios.post(responseUrl, {
                     response_type: "ephemeral",
-                    text: msg.content
+                    text: finalContent
                 });
 
                 break;
@@ -154,7 +168,7 @@ app.post("/slack/command", async (req, res) => {
             // Add to memory
             appendToHistory(userId, {
                 role: "assistant",
-                content: `[tool:${toolName}] ${JSON.stringify(toolResult)}`
+                content: `Used tool: ${toolName}.`
             });
 
             // And loop again (OpenAI may call another tool)
