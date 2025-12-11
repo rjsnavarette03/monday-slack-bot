@@ -2,20 +2,12 @@
 
 A fully autonomous AI assistant for Slack that can:
 
-* Talk like ChatGPT
-* Search your Google Drive
-* Read and analyze Google Sheets
-* Read and summarize Google Docs
-* Perform multi-step workflows (memory-based)
-* Respond normally to general conversation
-* Run on Render using Node.js
-
-Built with:
-
-* **OpenAI tool calling (gpt-4.1-mini)**
-* **Google Drive, Docs, Sheets APIs**
-* **Slack slash commands**
-* **Node.js + Express**
+* **Search and access** your Google Drive files.
+* **Read and analyze** Google Sheets and Google Docs.
+* Perform **multi-step workflows** using the file data.
+* **Respond naturally** to general queries (e.g., "hello", "thanks").
+* **Integrated with OpenAI's GPT** for intelligent responses.
+* **Robust error handling** for Drive, Docs, and Sheets.
 
 ---
 
@@ -23,45 +15,56 @@ Built with:
 
 ```
 monday-slack-bot/
-├─ index.js               # Main server, Slack handler, agent loop
-├─ aiAgent.js             # OpenAI client + SYSTEM_PROMPT + retry logic
-├─ tools.js               # OpenAI tool definitions
-├─ toolHandlers.js        # Maps tool calls → Google API functions
-├─ driveTools.js          # Drive, Sheets, Docs logic (Google APIs)
-├─ memoryStore.js         # In-memory conversation history
+├─ package.json               # Main dependencies & scripts
+├─ package-lock.json          # Ensures consistent installs
+├─ .gitignore                 # Ignores unnecessary files
+├─ README.md                  # This file
 
-# Optional / legacy (used before the agent system)
-├─ mondayClient.js
-├─ driveClient.js
-├─ sheetAnalytics.js
-├─ openaiClient.js
+├─ index.js                   # Main server & Slack event handler
+├─ aiAgent.js                 # OpenAI client, SYSTEM_PROMPT + retry logic
+├─ tools.js                   # OpenAI tool definitions (search_drive, read_sheet, etc.)
+├─ toolHandlers.js            # Logic for handling tool calls (Drive, Sheets, Docs)
+├─ driveTools.js              # Drive API helper functions (search, read, resolve shortcuts)
+├─ memoryStore.js             # In-memory storage for user conversation history
+
+# Optional / legacy files:
+├─ mondayClient.js            # Monday.com API helper (not needed now)
+├─ driveClient.js             # Google Sheets/Docs client (legacy, replaced by OAuth2)
+├─ sheetAnalytics.js          # Analytics-specific logic (only for legacy files)
+├─ openaiClient.js            # OpenAI-specific logic (legacy, merged into aiAgent.js)
 ```
 
 ---
 
 # ⚙️ Requirements
 
-* Node.js 18+
-* Slack Workspace (with Slash Commands enabled)
-* Google Cloud Project
-* Google Service Account (Drive + Sheets + Docs read access)
-* OpenAI API key
-* Render.com account for deployment
+* **Node.js 18+**
+* **Slack Workspace** (with Slash Commands enabled)
+* **Google Cloud Project** (Drive, Sheets, Docs APIs enabled)
+* **Google OAuth2 Client ID & Secret**
+* **OAuth2 Refresh Token** (for user authentication with Google Drive)
+* **OpenAI API key**
+* **Render** account for deployment
 
 ---
 
 # 🔧 Environment Variables (required)
 
-Set these in **Render → Environment Variables**:
+Add the following to **Render → Environment Variables**:
 
-| Variable                      | Description                                         |
-| ----------------------------- | --------------------------------------------------- |
-| `OPENAI_API_KEY`              | Your OpenAI API key                                 |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full JSON string of your Google service account key |
-| `PORT`                        | Port Render will bind to (defaults to 3000)         |
+| Variable               | Description                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY`       | Your OpenAI API key                                                             |
+| `GOOGLE_CLIENT_ID`     | Your Google OAuth Client ID                                                     |
+| `GOOGLE_CLIENT_SECRET` | Your Google OAuth Client Secret                                                 |
+| `GOOGLE_REDIRECT_URI`  | OAuth callback URL (e.g., `https://your-app.onrender.com/auth/google/callback`) |
+| `GOOGLE_REFRESH_TOKEN` | OAuth2 Refresh Token (obtained during OAuth authorization flow)                 |
+| `SLACK_BOT_TOKEN`      | Slack Bot User OAuth Token (xoxb-...)                                           |
 
-**Note:**
-`GOOGLE_SERVICE_ACCOUNT_JSON` must be the **entire JSON object**, exactly as downloaded, with newline escapes (`\n`) preserved inside the private key.
+You can get these values by:
+
+* **Google OAuth**: Set up OAuth2 in Google Cloud Console and get the `Client ID`, `Client Secret`, and `Refresh Token`.
+* **Slack Bot Token**: Create a Slack App, add required OAuth Scopes, and install it to your workspace.
 
 ---
 
@@ -69,93 +72,82 @@ Set these in **Render → Environment Variables**:
 
 ### 1. User sends a Slack message:
 
+```text
+/yourbot search "MBO AI Training"
 ```
-/mondaybot search my drive for "MBO"
+
+### 2. Render receives the payload and passes it to the agent:
+
+* **Searches Google Drive** using the query `"MBO AI Training"`
+* **Returns file results** with `index`, `id`, `name`, and `mimeType`
+
+### 3. User selects a file (e.g., "1"):
+
+```text
+1
 ```
 
-### 2. Render receives the payload
+### 4. Agent resolves the file based on index:
 
-`index.js` logs the message and loads conversation history.
+* **Fetches the `fileId`** and checks if it’s a **Google Sheet** or **Google Doc**.
+* Calls **read_sheet** or **read_doc** accordingly.
 
-### 3. OpenAI interprets the message
+### 5. Agent outputs a summary of the file:
 
-The model decides whether to:
-
-* Respond normally (`respond`)
-* Call a tool:
-
-  * `search_drive`
-  * `read_sheet`
-  * `read_doc`
-
-### 4. Tools are executed
-
-`toolHandlers.js` routes the call to:
-
-* `driveTools.js → findInDrive()`
-* `driveTools.js → readSheet()`
-* `driveTools.js → readDoc()`
-
-### 5. Tool output is returned to OpenAI
-
-The model uses the real file data to answer the question.
-
-### 6. Final answer is posted to Slack
-
-Sent via Slack `response_url`.
+* Displays the content of the file, or specific sections based on the query.
 
 ---
 
 # 🧩 Supported Commands / Examples
 
-### 🟢 General Chat
+### 🟢 **General Chat**
 
-```
-/mondaybot hello
-/mondaybot what can you do?
-```
-
-### 🟢 Search Google Drive
-
-```
-/mondaybot search my drive for "billing"
+```text
+/yourbot hello
+/yourbot what can you do?
 ```
 
-### 🟢 Read a Spreadsheet
+### 🟢 **Search Google Drive**
 
-```
-/mondaybot in the spreadsheet titled "MBO Leads & Ads Spend", what was yesterday’s spend?
-```
-
-### 🟢 Analyze Sheet Data
-
-```
-/mondaybot what are the last 7 days of spend in the 'MBO Leads & Ads Spend' sheet?
+```text
+/yourbot search "MBO AI Training"
 ```
 
-### 🟢 Read a Google Doc
+### 🟢 **Read a Spreadsheet**
 
-```
-/mondaybot open the document titled "Onboarding SOP" and summarize it
+```text
+/yourbot In the spreadsheet titled "MBO Leads & Ads Spend", what was yesterday’s spend?
 ```
 
-### 🟢 Multi-Step Workflows
+### 🟢 **Analyze Sheet Data**
 
+```text
+/yourbot what are the last 7 days of spend in the "MBO Leads & Ads Spend" sheet?
 ```
-/mondaybot search my drive for onboarding files
-/mondaybot open the second file
-/mondaybot summarize the last section
-/mondaybot rewrite as bullet points
+
+### 🟢 **Read a Google Doc**
+
+```text
+/yourbot open the document titled "Onboarding SOP" and summarize it
+```
+
+### 🟢 **Multi-Step Workflows**
+
+```text
+/yourbot search my drive for onboarding files
+/yourbot open the second file
+/yourbot summarize the last section
+/yourbot rewrite as bullet points
 ```
 
 ---
 
 # 🧰 Installation
 
-### 1. Clone repo
+### 1. Clone the repository
 
 ```bash
-git clone https://github.com/rjsnavarette03/monday-slack-bot.git
+git clone https://github.com/yourusername/monday-slack-bot.git
 cd monday-slack-bot
 ```
 
@@ -173,57 +165,64 @@ node index.js
 
 ---
 
-# 🛠 Google Cloud Setup (Service Account)
+# 🛠 Google Cloud Setup (OAuth2)
 
-1. Go to Google Cloud → IAM & Admin → Service Accounts
-2. Create new Service Account
-3. Add a key → JSON → Download
-4. Enable APIs:
+1. Go to **Google Cloud Console** → Create a new project (or use an existing one).
+2. Enable the **Google Drive API**, **Google Sheets API**, and **Google Docs API**.
+3. Go to **APIs & Services → Credentials** → Create **OAuth 2.0 Client IDs**.
+4. Set the **Redirect URI** for your app to:
 
-   * Google Drive API
-   * Google Sheets API
-   * Google Docs API
-5. Share any Drive files you want accessible with your service account’s email
-
+   ```text
+   https://your-app.onrender.com/auth/google/callback
    ```
-   your-service-account@project-id.iam.gserviceaccount.com
-   ```
+5. Download the credentials JSON and copy the **Client ID** and **Client Secret** into your `.env` file.
+6. Authorize your app with Google to get the **OAuth2 refresh token** and store it in the `.env` file.
+
+   * Visit:
+
+     ```text
+     https://your-app.onrender.com/auth/google
+     ```
 
 ---
 
-# 🔗 Slack Setup (Slash Command)
+# 🔗 Slack Setup (Bot)
 
-1. Go to Slack → Build → Slash Commands
-2. Create a command:
+1. Go to **Slack API → Your Apps** → Create a new Slack App.
+2. Enable **OAuth Scopes**:
 
-   ```
-   /mondaybot
-   ```
-3. Set Request URL:
+   * `chat:write` (to send messages)
+   * `im:history` (to read direct messages)
+   * `im:read` (to read DMs)
+   * `app_mentions:read` (to detect @mentions)
+3. Create a **Slash Command**:
 
-   ```
-   https://your-render-app.onrender.com/slack/command
-   ```
-4. Save
+   * Command: `/yourbot`
+   * Request URL:
+
+     ```text
+     https://your-app.onrender.com/slack/command
+     ```
+4. Install the app to your workspace and get the **Bot Token** (`xoxb-...`).
 
 ---
 
 # 🚀 Deploy on Render
 
-1. Create new Web Service
-2. Connect GitHub repo
-3. Set build command:
+1. Create a new **Web Service** on **Render**.
+2. Connect your GitHub repository.
+3. Set the **build command** to:
 
-   ```
+   ```bash
    npm install
    ```
-4. Set start command:
+4. Set the **start command** to:
 
-   ```
+   ```bash
    node index.js
    ```
-5. Add environment variables
-6. Deploy
+5. Add environment variables in the **Render Dashboard**.
+6. Deploy.
 
 ---
 
@@ -231,16 +230,16 @@ node index.js
 
 ### See tool calls:
 
-Check Render logs — they will show:
+Check Render logs for:
 
 ```json
 "tool_calls": [
   {
-    "id": "...",
+    "id": "call_abc123",
     "type": "function",
     "function": {
       "name": "search_drive",
-      "arguments": "{ \"query\": \"MBO\" }"
+      "arguments": "{ \"query\": \"MBO AI Training\" }"
     }
   }
 ]
@@ -248,30 +247,30 @@ Check Render logs — they will show:
 
 ### Common issues:
 
-| Issue                     | Fix                                                               |
-| ------------------------- | ----------------------------------------------------------------- |
-| “Unknown tool: undefined” | Using wrong tool format — ensure tools.js uses `type: "function"` |
-| JSON parse error          | Check if tool arguments are valid JSON                            |
-| 429 rate limit            | Uses GPT-4.1-mini + retry logic                                   |
-| No data returned          | Ensure Drive files are shared with service account                |
+| Issue                         | Fix                                                                                    |
+| ----------------------------- | -------------------------------------------------------------------------------------- |
+| **"Unknown tool: undefined"** | Ensure that `tools.js` is correctly structured with `function` name and arguments.     |
+| **JSON parse error**          | Check if `tool arguments` are properly structured and valid JSON.                      |
+| **Rate limit (429)**          | Switch to `gpt-4.1-mini`, optimize memory storage, and use retry logic for tool calls. |
+| **File not found (404)**      | Ensure the correct `fileId` is used for the document. Validate IDs and mimeTypes.      |
 
 ---
 
 # ⭐ Future Improvements (optional)
 
-* Persistent memory using Redis
-* Support for reading PDFs
-* Email automation
-* AI workflows triggered by Slack reactions
-* Monday.com integration (on hold)
+* Persistent memory using **Redis**
+* Support for **reading PDFs** and **images**
+* **Email automation**
+* AI workflows triggered by Slack **reactions**
+* Integration with **Monday.com** (on hold)
 
 ---
 
 # 🙌 Credits
 
-Built collaboratively using:
+Built with ❤️ by [Raven](https://www.rjsnavarette.com "Raven's Website") using:
 
-* OpenAI API
-* Google Cloud APIs
-* Slack slash commands
-* Render.com
+* **OpenAI GPT-4** for natural language processing
+* **Google Cloud APIs** (Drive, Sheets, Docs) for file access
+* **Slack API** for Slack integration
+* **Render** for deployment

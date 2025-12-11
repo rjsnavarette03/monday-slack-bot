@@ -206,118 +206,118 @@ app.get("/", (req, res) => {
 });
 
 // Slash command handler
-app.post("/slack/command", async (req, res) => {
-    const userText = req.body.text || "";
-    const userId = req.body.user_id;
-    const responseUrl = req.body.response_url;
+// app.post("/slack/command", async (req, res) => {
+//     const userText = req.body.text || "";
+//     const userId = req.body.user_id;
+//     const responseUrl = req.body.response_url;
 
-    // Prevent Slack request timeout
-    res.json({
-        response_type: "ephemeral",
-        text: "🤖 Working on it..."
-    });
+//     // Prevent Slack request timeout
+//     res.json({
+//         response_type: "ephemeral",
+//         text: "🤖 Working on it..."
+//     });
 
-    try {
-        // Load user conversation memory
-        let history = getHistory(userId);
+//     try {
+//         // Load user conversation memory
+//         let history = getHistory(userId);
 
-        // Record new user message
-        appendToHistory(userId, { role: "user", content: userText });
+//         // Record new user message
+//         appendToHistory(userId, { role: "user", content: userText });
 
-        // Build messages array for OpenAI
-        let messages = [
-            { role: "system", content: SYSTEM_PROMPT },
-            ...history
-        ];
+//         // Build messages array for OpenAI
+//         let messages = [
+//             { role: "system", content: SYSTEM_PROMPT },
+//             ...history
+//         ];
 
-        while (true) {
-            const result = await runAgent(messages);
-            const msg = result.choices[0].message;
+//         while (true) {
+//             const result = await runAgent(messages);
+//             const msg = result.choices[0].message;
 
-            // CASE 1 — No tools requested → final answer
-            if (!msg.tool_calls?.length) {
+//             // CASE 1 — No tools requested → final answer
+//             if (!msg.tool_calls?.length) {
 
-                // Clean up JSON-like assistant messages
-                let finalContent = msg.content;
+//                 // Clean up JSON-like assistant messages
+//                 let finalContent = msg.content;
 
-                try {
-                    const parsed = JSON.parse(finalContent);
-                    if (parsed?.text) {
-                        finalContent = parsed.text;
-                    }
-                } catch (_) {
-                    // It's fine — message was not JSON
-                }
+//                 try {
+//                     const parsed = JSON.parse(finalContent);
+//                     if (parsed?.text) {
+//                         finalContent = parsed.text;
+//                     }
+//                 } catch (_) {
+//                     // It's fine — message was not JSON
+//                 }
 
-                // Store ONLY natural language responses in memory
-                appendToHistory(userId, { role: "assistant", content: finalContent });
+//                 // Store ONLY natural language responses in memory
+//                 appendToHistory(userId, { role: "assistant", content: finalContent });
 
-                await axios.post(responseUrl, {
-                    response_type: "ephemeral",
-                    text: finalContent
-                });
+//                 await axios.post(responseUrl, {
+//                     response_type: "ephemeral",
+//                     text: finalContent
+//                 });
 
-                break;
-            }
+//                 break;
+//             }
 
-            // CASE 2 — Tool call received
-            const toolCall = msg.tool_calls[0];
+//             // CASE 2 — Tool call received
+//             const toolCall = msg.tool_calls[0];
 
-            // Extract tool name
-            const toolName = toolCall.function?.name;
+//             // Extract tool name
+//             const toolName = toolCall.function?.name;
 
-            if (!toolName) {
-                console.error("❌ Tool call missing function.name:", toolCall);
+//             if (!toolName) {
+//                 console.error("❌ Tool call missing function.name:", toolCall);
 
-                await axios.post(responseUrl, {
-                    response_type: "ephemeral",
-                    text: "❌ AI attempted a tool call but did not specify a tool name."
-                });
+//                 await axios.post(responseUrl, {
+//                     response_type: "ephemeral",
+//                     text: "❌ AI attempted a tool call but did not specify a tool name."
+//                 });
 
-                break;
-            }
+//                 break;
+//             }
 
-            // Extract & parse arguments
-            let args = {};
-            try {
-                args = toolCall.function.arguments
-                    ? JSON.parse(toolCall.function.arguments)
-                    : {};
-            } catch (err) {
-                console.error("❌ Failed to parse tool arguments:", toolCall.function.arguments);
-            }
+//             // Extract & parse arguments
+//             let args = {};
+//             try {
+//                 args = toolCall.function.arguments
+//                     ? JSON.parse(toolCall.function.arguments)
+//                     : {};
+//             } catch (err) {
+//                 console.error("❌ Failed to parse tool arguments:", toolCall.function.arguments);
+//             }
 
-            // Execute the tool
-            const toolResult = await handleToolCall({
-                name: toolName,
-                arguments: args
-            });
+//             // Execute the tool
+//             const toolResult = await handleToolCall({
+//                 name: toolName,
+//                 arguments: args
+//             });
 
-            // Add tool result into next OpenAI call
-            messages.push({
-                role: "assistant",
-                tool_call_id: toolCall.id,
-                content: JSON.stringify(toolResult)
-            });
+//             // Add tool result into next OpenAI call
+//             messages.push({
+//                 role: "assistant",
+//                 tool_call_id: toolCall.id,
+//                 content: JSON.stringify(toolResult)
+//             });
 
-            // Add to memory
-            appendToHistory(userId, {
-                role: "assistant",
-                content: `Used tool: ${toolName}.`
-            });
+//             // Add to memory
+//             appendToHistory(userId, {
+//                 role: "assistant",
+//                 content: `Used tool: ${toolName}.`
+//             });
 
-            // And loop again (OpenAI may call another tool)
-        }
+//             // And loop again (OpenAI may call another tool)
+//         }
 
-    } catch (err) {
-        console.error("Agent error:", err);
+//     } catch (err) {
+//         console.error("Agent error:", err);
 
-        await axios.post(responseUrl, {
-            response_type: "ephemeral",
-            text: "❌ Error: " + err.message
-        });
-    }
-});
+//         await axios.post(responseUrl, {
+//             response_type: "ephemeral",
+//             text: "❌ Error: " + err.message
+//         });
+//     }
+// });
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
