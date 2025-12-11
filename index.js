@@ -84,6 +84,27 @@ app.post("/slack/command", async (req, res) => {
     });
 });
 
+app.get("/test-google", async (req, res) => {
+    try {
+        const { google } = require("googleapis");
+        const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+
+        const auth = new google.auth.JWT(
+            creds.client_email,
+            null,
+            creds.private_key,
+            ["https://www.googleapis.com/auth/drive.readonly"]
+        );
+
+        await auth.authorize();
+
+        return res.send("Google Auth SUCCESS!");
+    } catch (err) {
+        console.error(err);
+        return res.send("Google Auth FAILED: " + err.message);
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
