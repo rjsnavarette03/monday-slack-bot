@@ -31,7 +31,7 @@ module.exports = [
         type: "function",
         function: {
             name: "read_doc",
-            description: "Read a Google Docs document and return all text.",
+            description: "Read a Google Docs document and return text.",
             parameters: {
                 type: "object",
                 properties: {
@@ -45,7 +45,7 @@ module.exports = [
         type: "function",
         function: {
             name: "respond",
-            description: "Return a natural language response when no tool is needed.",
+            description: "Respond with natural language when no tools are needed.",
             parameters: {
                 type: "object",
                 properties: {
