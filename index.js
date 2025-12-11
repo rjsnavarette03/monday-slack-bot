@@ -160,20 +160,20 @@ app.post("/slack/events", async (req, res) => {
                         : {};
                 } catch (_) { }
 
-                const toolResult = await handleToolCall({
-                    name: toolName,
-                    arguments: args,
-                });
+                const toolOutput = await handleToolCall(
+                    { name: toolName, arguments: args },
+                    userId
+                );
 
                 messages.push({
                     role: "assistant",
                     tool_call_id: toolCall.id,
-                    content: JSON.stringify(toolResult),
+                    content: JSON.stringify(toolOutput)
                 });
 
                 appendToHistory(userId, {
                     role: "assistant",
-                    content: `Used tool: ${toolName}.`,
+                    content: `Used tool: ${toolName}.`
                 });
             }
         } catch (err) {

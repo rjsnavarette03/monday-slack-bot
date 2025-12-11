@@ -1,3 +1,4 @@
+// tools.js
 module.exports = [
     {
         type: "function",
@@ -7,7 +8,7 @@ module.exports = [
             parameters: {
                 type: "object",
                 properties: {
-                    query: { type: "string" }
+                    query: { type: "string", description: "Search term or filename" }
                 },
                 required: ["query"]
             }
@@ -17,13 +18,18 @@ module.exports = [
         type: "function",
         function: {
             name: "read_sheet",
-            description: "Read a Google Sheets document and return cell values.",
+            description:
+                "Read a Google Sheets file that was returned from the most recent search_drive call. Select it by its numbered index from that list.",
             parameters: {
                 type: "object",
                 properties: {
-                    fileId: { type: "string" }
+                    index: {
+                        type: "integer",
+                        description:
+                            "1-based index of the file from the last search_drive result (e.g. 1 for the first file)."
+                    }
                 },
-                required: ["fileId"]
+                required: ["index"]
             }
         }
     },
@@ -31,13 +37,18 @@ module.exports = [
         type: "function",
         function: {
             name: "read_doc",
-            description: "Read a Google Docs document and return text.",
+            description:
+                "Read a Google Docs file that was returned from the most recent search_drive call. Select it by its numbered index from that list.",
             parameters: {
                 type: "object",
                 properties: {
-                    fileId: { type: "string" }
+                    index: {
+                        type: "integer",
+                        description:
+                            "1-based index of the file from the last search_drive result (e.g. 1 for the first file)."
+                    }
                 },
-                required: ["fileId"]
+                required: ["index"]
             }
         }
     },
@@ -45,7 +56,7 @@ module.exports = [
         type: "function",
         function: {
             name: "respond",
-            description: "Respond with natural language when no tools are needed.",
+            description: "Return a natural language reply when no tools are needed.",
             parameters: {
                 type: "object",
                 properties: {

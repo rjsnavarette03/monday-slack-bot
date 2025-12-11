@@ -1,7 +1,6 @@
 const memory = {};  // { userId: [messages] }
-let lastSearchResults = {};
+const lastSearchResults = {}; // { userId: [ { index, id, name, mimeType } ] }
 
-// Return last 10 messages only
 function getHistory(userId) {
     if (!memory[userId]) memory[userId] = [];
     return memory[userId];
@@ -11,7 +10,7 @@ function appendToHistory(userId, message) {
     if (!memory[userId]) memory[userId] = [];
     memory[userId].push(message);
 
-    // Prevent overflow
+    // keep last 10 messages
     if (memory[userId].length > 10) {
         memory[userId] = memory[userId].slice(-10);
     }
@@ -19,10 +18,11 @@ function appendToHistory(userId, message) {
 
 function clearHistory(userId) {
     memory[userId] = [];
+    lastSearchResults[userId] = [];
 }
 
 function setLastSearch(userId, files) {
-    lastSearchResults[userId] = files;
+    lastSearchResults[userId] = files || [];
 }
 
 function getLastSearch(userId) {

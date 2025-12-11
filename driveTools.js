@@ -64,14 +64,14 @@ async function findInDrive(query) {
     const res = await drive.files.list({
         q: `name contains '${query.replace(/'/g, "\\'")}' and trashed = false`,
         fields: "files(id, name, mimeType)",
-        pageSize: 20,
+        pageSize: 20
     });
 
     const files = (res.data.files || []).map((f, index) => ({
         index: index + 1,
         id: f.id,
         name: f.name,
-        mimeType: f.mimeType,
+        mimeType: f.mimeType
     }));
 
     console.log("search_drive results:", files);
