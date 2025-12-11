@@ -1,34 +1,50 @@
 const OpenAI = require("openai");
 const tools = require("./tools");
 
+// OpenAI client
 const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-const SYSTEM_PROMPT = `
-You are an AI assistant connected to Google Drive, Google Sheets, and Google Docs.
+// Automatic retry wrapper for 429s
+async function callOpenAIWithRetry(payload, retries = 3) {
+    try {
+        return await client.chat.completions.create(payload);
+    } catch (err) {
+        if (err.status === 429 && retries > 0) {
+            const wait = 500; // 0.5s
+            console.warn(`⚠️ Rate limit hit. Retrying in ${wait}ms...`);
+            await new Promise(r => setTimeout(r, wait));
+            return callOpenAIWithRetry(payload, retries - 1);
+        }
+        throw err;
+    }
+}
 
-You have these tools available:
+const SYSTEM_PROMPT = `
+You are a Slack AI assistant connected to Google Drive. 
+You decide when to use tools.
+
+TOOLS:
 - search_drive(query)
 - read_sheet(fileId)
 - read_doc(fileId)
 - respond(text)
 
 RULES:
-1. If the user asks anything involving Drive, files, spreadsheets, or documents:
-   - FIRST call search_drive.
-   - If multiple results found, ask the user which one they meant.
-   - If a spreadsheet, call read_sheet.
-   - If a doc, call read_doc.
-2. NEVER guess file contents — always use tools to fetch real data.
-3. If the user references a file you previously opened, you may continue using it without searching again.
-4. If the user asks a general question unrelated to Drive → call respond().
-5. Always return valid JSON tool calls.
+1. Use tools ONLY when user requests info from Google Drive, Docs, or Sheets.
+2. For greetings or general chat ("hello", "thanks", "how are you", etc)
+   → ALWAYS call respond().
+3. NEVER guess any file content.
+4. If a file is referenced, search for it first.
+5. If multiple files match a search, ask the user which one.
+6. Keep replies short and practical unless asked otherwise.
 `;
 
+// Run the agent with tool calling
 async function runAgent(messages) {
-    return client.chat.completions.create({
-        model: "gpt-4.1",
+    return callOpenAIWithRetry({
+        model: "gpt-4.1-mini",     // ← Recommended for tool calling agents
         messages,
         tools,
         tool_choice: "auto"

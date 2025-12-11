@@ -26,119 +26,63 @@ app.post("/slack/command", async (req, res) => {
     const userId = req.body.user_id;
     const responseUrl = req.body.response_url;
 
-    // Prevent Slack timeout
-    res.json({ response_type: "ephemeral", text: "🤖 Working on it..." });
+    // Avoid Slack timeout
+    res.json({
+        response_type: "ephemeral",
+        text: "🤖 Working on it..."
+    });
 
     try {
-        // Retrieve conversation history
-        const history = getHistory(userId);
+        // Get user conversation memory
+        let history = getHistory(userId);
 
         // Add user message
-        history.push({ role: "user", content: userText });
+        appendToHistory(userId, { role: "user", content: userText });
 
-        // Build message array
-        let messages = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
+        // Build message list (system + memory)
+        let messages = [
+            { role: "system", content: SYSTEM_PROMPT },
+            ...history
+        ];
 
         while (true) {
             const result = await runAgent(messages);
             const msg = result.choices[0].message;
 
-            // If no tool call — final answer
+            // If AI returns a final answer (no tools)
             if (!msg.tool_calls?.length) {
-                history.push({ role: "assistant", content: msg.content });
+                appendToHistory(userId, { role: "assistant", content: msg.content });
 
                 await axios.post(responseUrl, {
                     response_type: "ephemeral",
                     text: msg.content
                 });
-
                 break;
             }
 
-            // Handle tool call
+            // Handle first tool call
             const toolCall = msg.tool_calls[0];
-            const toolResult = await handleToolCall(toolCall);
+            const toolOutput = await handleToolCall(toolCall);
 
-            // Push tool result
+            // Append tool result
             messages.push({
                 role: "assistant",
                 tool_call_id: toolCall.id,
-                content: JSON.stringify(toolResult)
+                content: JSON.stringify(toolOutput)
+            });
+
+            // Add to conversation memory
+            appendToHistory(userId, {
+                role: "assistant",
+                content: `[tool:${toolCall.function.name}] ${JSON.stringify(toolOutput)}`
             });
         }
     } catch (err) {
+        console.error("Agent error:", err);
         await axios.post(responseUrl, {
             response_type: "ephemeral",
             text: "❌ Error: " + err.message
         });
-    }
-});
-
-// Test Google Auth endpoint
-app.get("/test-google", async (req, res) => {
-    try {
-        const { google } = require("googleapis");
-
-        const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-        if (!raw) {
-            return res.status(500).send("GOOGLE_SERVICE_ACCOUNT_JSON is NOT set.");
-        }
-
-        let creds;
-        try {
-            creds = JSON.parse(raw);
-        } catch (e) {
-            console.error("JSON parse error:", e);
-            return res
-                .status(500)
-                .send("Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON as JSON.");
-        }
-
-        const keys = Object.keys(creds);
-        const hasPrivateKey =
-            typeof creds.private_key === "string" && creds.private_key.length > 0;
-        const hasClientEmail =
-            typeof creds.client_email === "string" && creds.client_email.length > 0;
-
-        console.log("Service account keys present:", keys);
-        console.log("Has private_key?", hasPrivateKey);
-        console.log("Has client_email?", hasClientEmail);
-
-        if (!hasPrivateKey) {
-            return res
-                .status(500)
-                .send(
-                    "Parsed JSON but it does NOT contain a valid private_key field."
-                );
-        }
-
-        const scopes = [
-            "https://www.googleapis.com/auth/drive.readonly",
-            "https://www.googleapis.com/auth/spreadsheets.readonly",
-        ];
-
-        // ✅ Use GoogleAuth instead of JWT directly
-        const auth = new google.auth.GoogleAuth({
-            credentials: creds,
-            scopes,
-        });
-
-        const client = await auth.getClient();
-        // Just to confirm it really works, make a simple Drive call:
-        const drive = google.drive({ version: "v3", auth: client });
-
-        // List 1 file (if accessible)
-        const resp = await drive.files.list({
-            pageSize: 1,
-            fields: "files(id, name)",
-        });
-
-        console.log("Sample Drive list result:", resp.data.files);
-
-        return res.send("Google Auth SUCCESS! I can talk to Drive ✅");
-    } catch (err) {
-        console.error(err);
-        return res.send("Google Auth FAILED: " + err.message);
     }
 });
 
