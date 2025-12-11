@@ -78,10 +78,13 @@ app.post("/slack/events", async (req, res) => {
     if (body.type === "event_callback") {
         const event = body.event;
 
-        // Ignore bot messages (avoid loops)
-        if (event.subtype === "bot_message") {
-            return res.sendStatus(200);
-        }
+        // 🚫 Ignore any messages originating from bots (including this bot)
+        if (event.subtype === "bot_message") return res.sendStatus(200);
+        if (event.bot_id) return res.sendStatus(200);
+
+        // 🚫 Ignore messages sent by THIS bot user
+        const botUserId = body.authorizations?.[0]?.user_id;
+        if (event.user === botUserId) return res.sendStatus(200);
 
         // We only care about DMs to the bot or @mentions for now
         const isDM = event.channel_type === "im";
