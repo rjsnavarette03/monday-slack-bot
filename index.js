@@ -1,4 +1,5 @@
 const express = require("express");
+const axios = require("axios");
 const { getBoardSummary } = require("./mondayClient");
 const { findSpreadsheetByTitle, getSheetValues } = require("./driveClient");
 const { answerFromSheet } = require("./openaiClient");
@@ -16,11 +17,12 @@ app.get("/", (req, res) => {
 });
 
 // Slash command handler
-app.post("/slack/command", async (req, res) => {
+app.post("/slack/command", (req, res) => {
     console.log("Slash command payload:", req.body);
 
     const userText = (req.body.text || "").trim();
     const userName = req.body.user_name || "there";
+    const responseUrl = req.body.response_url;
 
     // 1) Monday analyze command - placeholder for now
     if (userText.startsWith("analyze")) {
@@ -30,52 +32,64 @@ app.post("/slack/command", async (req, res) => {
         });
     }
 
-    // 2) Google Drive flow (no OpenAI yet)
+    // 2) Google Drive + OpenAI flow
     const titleMatch = userText.match(/spreadsheet titled '([^']+)'/i);
     if (titleMatch) {
         const sheetTitle = titleMatch[1];
 
-        try {
-            // a) Find the spreadsheet
-            const file = await findSpreadsheetByTitle(sheetTitle);
-            if (!file) {
-                return res.json({
+        // Immediately acknowledge to avoid Slack timeout
+        res.json({
+            response_type: "ephemeral",
+            text: `🔍 Got it, ${userName}. I'm looking in the spreadsheet titled '${sheetTitle}' and will post the answer here shortly...`,
+        });
+
+        // Do the heavy work asynchronously
+        (async () => {
+            try {
+                // a) Find the spreadsheet
+                const file = await findSpreadsheetByTitle(sheetTitle);
+                if (!file) {
+                    await axios.post(responseUrl, {
+                        response_type: "ephemeral",
+                        text: `❌ I couldn't find a spreadsheet in Drive titled '${sheetTitle}'. Make sure it exists and is shared with the service account.`,
+                    });
+                    return;
+                }
+
+                // b) Get sheet values
+                const values = await getSheetValues(file.id);
+                if (!values.length) {
+                    await axios.post(responseUrl, {
+                        response_type: "ephemeral",
+                        text: `I found '${file.name}' but it appears to be empty or has no data.`,
+                    });
+                    return;
+                }
+
+                // c) Ask OpenAI to answer based on the sheet + original question
+                const aiAnswer = await answerFromSheet(userText, values);
+
+                const message =
+                    `📄 *Sheet:* ${file.name}\n` +
+                    `Here’s what I found based on your question:\n\n` +
+                    aiAnswer;
+
+                await axios.post(responseUrl, {
                     response_type: "ephemeral",
-                    text: `❌ I couldn't find a spreadsheet in Drive titled '${sheetTitle}'. Make sure it exists and is shared with the service account.`,
+                    text: message,
+                });
+            } catch (err) {
+                console.error("Error handling Drive/OpenAI question:", err);
+                await axios.post(responseUrl, {
+                    response_type: "ephemeral",
+                    text:
+                        "⚠️ Something went wrong while talking to Google Drive or OpenAI. Check the logs in Render.",
                 });
             }
+        })();
 
-            // b) Get sheet values (just to confirm we can read it)
-            const values = await getSheetValues(file.id);
-            const rowCount = values.length;
-            const colCount = values[0] ? values[0].length : 0;
-
-            // Build a very small, safe summary
-            const headerRow = values[0] || [];
-            const headerPreview =
-                headerRow.length > 0
-                    ? headerRow.map((h) => `• ${h}`).join("\n")
-                    : "No headers (first row is empty).";
-
-            const message =
-                `📄 *Sheet:* ${file.name}\n` +
-                `• ID: \`${file.id}\`\n` +
-                `• Rows: *${rowCount}*\n` +
-                `• Columns: *${colCount}*\n\n` +
-                `Here are the column headers I see:\n${headerPreview}`;
-
-            return res.json({
-                response_type: "ephemeral",
-                text: message,
-            });
-        } catch (err) {
-            console.error("Error handling Drive question:", err);
-            return res.json({
-                response_type: "ephemeral",
-                text:
-                    "⚠️ Something went wrong while talking to Google Drive. Check the logs in Render.",
-            });
-        }
+        // Important: return here so we don't fall through
+        return;
     }
 
     // 3) Fallback: simple echo
@@ -85,6 +99,7 @@ app.post("/slack/command", async (req, res) => {
     });
 });
 
+// Test Google Auth endpoint
 app.get("/test-google", async (req, res) => {
     try {
         const { google } = require("googleapis");
