@@ -2,6 +2,7 @@ const express = require("express");
 const axios = require("axios");
 const { getBoardSummary } = require("./mondayClient");
 const { findSpreadsheetByTitle, getSheetValues } = require("./driveClient");
+const { summarizeAdSpendFromSheet } = require("./sheetAnalytics");
 const { answerFromSheet } = require("./openaiClient");
 
 const app = express();
@@ -24,7 +25,7 @@ app.post("/slack/command", (req, res) => {
     const userName = req.body.user_name || "there";
     const responseUrl = req.body.response_url;
 
-    // 1) Monday analyze command - placeholder for now
+    // 1) Monday analyze command - still placeholder
     if (userText.startsWith("analyze")) {
         return res.json({
             response_type: "ephemeral",
@@ -32,21 +33,20 @@ app.post("/slack/command", (req, res) => {
         });
     }
 
-    // 2) Google Drive + OpenAI flow
+    // 2) Google Drive flow for spreadsheets
     const titleMatch = userText.match(/spreadsheet titled '([^']+)'/i);
     if (titleMatch) {
         const sheetTitle = titleMatch[1];
 
-        // Immediately acknowledge to avoid Slack timeout
+        // Fast ack to Slack
         res.json({
             response_type: "ephemeral",
             text: `🔍 Got it, ${userName}. I'm looking in the spreadsheet titled '${sheetTitle}' and will post the answer here shortly...`,
         });
 
-        // Do the heavy work asynchronously
         (async () => {
             try {
-                // a) Find the spreadsheet
+                // Find spreadsheet
                 const file = await findSpreadsheetByTitle(sheetTitle);
                 if (!file) {
                     await axios.post(responseUrl, {
@@ -56,9 +56,8 @@ app.post("/slack/command", (req, res) => {
                     return;
                 }
 
-                // b) Get sheet values
                 const values = await getSheetValues(file.id);
-                if (!values.length) {
+                if (!values || !values.length) {
                     await axios.post(responseUrl, {
                         response_type: "ephemeral",
                         text: `I found '${file.name}' but it appears to be empty or has no data.`,
@@ -66,33 +65,86 @@ app.post("/slack/command", (req, res) => {
                     return;
                 }
 
-                // c) Ask OpenAI to answer based on the sheet + original question
-                const aiAnswer = await answerFromSheet(userText, values);
+                // If the question mentions "spend" we’ll run our numeric logic
+                if (userText.toLowerCase().includes("spend")) {
+                    const summary = summarizeAdSpendFromSheet(userText, values);
 
-                const message =
-                    `📄 *Sheet:* ${file.name}\n` +
-                    `Here’s what I found based on your question:\n\n` +
-                    aiAnswer;
+                    if (!summary.ok) {
+                        await axios.post(responseUrl, {
+                            response_type: "ephemeral",
+                            text: `📄 *Sheet:* ${file.name}\n${summary.message}`,
+                        });
+                        return;
+                    }
 
-                await axios.post(responseUrl, {
-                    response_type: "ephemeral",
-                    text: message,
-                });
-            } catch (err) {
-                console.error("Error handling Drive/OpenAI question:", err);
+                    const { label, range, latestInRange, latestOverall, hasDataInRange, total, days } =
+                        summary;
+
+                    const rangeStr = `${range.start.toISOString().slice(0, 10)} to ${range.end
+                        .toISOString()
+                        .slice(0, 10)}`;
+
+                    let text;
+
+                    if (hasDataInRange) {
+                        if (label === "yesterday") {
+                            text =
+                                `📄 *Sheet:* ${file.name}\n` +
+                                `For *yesterday* (${range.start.toISOString().slice(0, 10)}), total ad spend was *$${total.toFixed(
+                                    2
+                                )}*.\n` +
+                                `Latest row in that range is ${latestInRange.dateStr} with spend *$${latestInRange.value.toFixed(
+                                    2
+                                )}*.`;
+                        } else {
+                            text =
+                                `📄 *Sheet:* ${file.name}\n` +
+                                `For *${label}* (${rangeStr}), total ad spend was *$${total.toFixed(
+                                    2
+                                )}* across *${days}* day(s).\n` +
+                                `Most recent date in that range is ${latestInRange.dateStr} with spend *$${latestInRange.value.toFixed(
+                                    2
+                                )}*.`;
+                        }
+                    } else {
+                        text =
+                            `📄 *Sheet:* ${file.name}\n` +
+                            `I couldn't find any ad spend data for *${label}* (${rangeStr}).\n` +
+                            (latestOverall
+                                ? `The latest available data in the sheet is ${latestOverall.dateStr} with spend *$${latestOverall.value?.toFixed(
+                                    2
+                                ) || "N/A"}*.`
+                                : "I couldn't find any valid ad spend data at all.");
+                    }
+
+                    await axios.post(responseUrl, {
+                        response_type: "ephemeral",
+                        text,
+                    });
+                    return;
+                }
+
+                // If it's not a "spend" question, you can still fall back to OpenAI or a generic summary here.
                 await axios.post(responseUrl, {
                     response_type: "ephemeral",
                     text:
-                        "⚠️ Something went wrong while talking to Google Drive or OpenAI. Check the logs in Render.",
+                        `📄 *Sheet:* ${file.name}\n` +
+                        `I can see ${values.length - 1} data row(s). Right now I'm optimized for questions about ad spend (yesterday, last 7 days, last month).`,
+                });
+            } catch (err) {
+                console.error("Error handling Drive question:", err);
+                await axios.post(responseUrl, {
+                    response_type: "ephemeral",
+                    text:
+                        "⚠️ Something went wrong while talking to Google Drive. Check the logs in Render.",
                 });
             }
         })();
 
-        // Important: return here so we don't fall through
         return;
     }
 
-    // 3) Fallback: simple echo
+    // 3) Fallback: echo
     return res.json({
         response_type: "ephemeral",
         text: `Got it, ${userName}. You said: "${userText}" 👌`,
