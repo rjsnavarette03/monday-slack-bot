@@ -4,6 +4,9 @@ const { getBoardSummary } = require("./mondayClient");
 const { findSpreadsheetByTitle, getSheetValues } = require("./driveClient");
 const { summarizeAdSpendFromSheet } = require("./sheetAnalytics");
 const { answerFromSheet } = require("./openaiClient");
+const { runAgent, SYSTEM_PROMPT } = require("./aiAgent");
+const { handleToolCall } = require("./toolHandlers");
+const { getHistory, appendToHistory } = require("./memoryStore");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,137 +21,57 @@ app.get("/", (req, res) => {
 });
 
 // Slash command handler
-app.post("/slack/command", (req, res) => {
-    console.log("Slash command payload:", req.body);
-
-    const userText = (req.body.text || "").trim();
-    const userName = req.body.user_name || "there";
+app.post("/slack/command", async (req, res) => {
+    const userText = req.body.text || "";
+    const userId = req.body.user_id;
     const responseUrl = req.body.response_url;
 
-    // 1) Monday analyze command - still placeholder
-    if (userText.startsWith("analyze")) {
-        return res.json({
-            response_type: "ephemeral",
-            text: "Analyze command is currently disabled until Monday API is ready.",
-        });
-    }
+    // Prevent Slack timeout
+    res.json({ response_type: "ephemeral", text: "🤖 Working on it..." });
 
-    // 2) Google Drive flow for spreadsheets
-    const titleMatch = userText.match(/spreadsheet titled '([^']+)'/i);
-    if (titleMatch) {
-        const sheetTitle = titleMatch[1];
+    try {
+        // Retrieve conversation history
+        const history = getHistory(userId);
 
-        // Fast ack to Slack
-        res.json({
-            response_type: "ephemeral",
-            text: `🔍 Got it, ${userName}. I'm looking in the spreadsheet titled '${sheetTitle}' and will post the answer here shortly...`,
-        });
+        // Add user message
+        history.push({ role: "user", content: userText });
 
-        (async () => {
-            try {
-                // Find spreadsheet
-                const file = await findSpreadsheetByTitle(sheetTitle);
-                if (!file) {
-                    await axios.post(responseUrl, {
-                        response_type: "ephemeral",
-                        text: `❌ I couldn't find a spreadsheet in Drive titled '${sheetTitle}'. Make sure it exists and is shared with the service account.`,
-                    });
-                    return;
-                }
+        // Build message array
+        let messages = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
 
-                const values = await getSheetValues(file.id);
-                if (!values || !values.length) {
-                    await axios.post(responseUrl, {
-                        response_type: "ephemeral",
-                        text: `I found '${file.name}' but it appears to be empty or has no data.`,
-                    });
-                    return;
-                }
+        while (true) {
+            const result = await runAgent(messages);
+            const msg = result.choices[0].message;
 
-                // If the question mentions "spend" we’ll run our numeric logic
-                if (userText.toLowerCase().includes("spend")) {
-                    const summary = summarizeAdSpendFromSheet(userText, values);
+            // If no tool call — final answer
+            if (!msg.tool_calls?.length) {
+                history.push({ role: "assistant", content: msg.content });
 
-                    if (!summary.ok) {
-                        await axios.post(responseUrl, {
-                            response_type: "ephemeral",
-                            text: `📄 *Sheet:* ${file.name}\n${summary.message}`,
-                        });
-                        return;
-                    }
-
-                    const { label, range, latestInRange, latestOverall, hasDataInRange, total, days } =
-                        summary;
-
-                    const rangeStr = `${range.start.toISOString().slice(0, 10)} to ${range.end
-                        .toISOString()
-                        .slice(0, 10)}`;
-
-                    let text;
-
-                    if (hasDataInRange) {
-                        if (label === "yesterday") {
-                            text =
-                                `📄 *Sheet:* ${file.name}\n` +
-                                `For *yesterday* (${range.start.toISOString().slice(0, 10)}), total ad spend was *$${total.toFixed(
-                                    2
-                                )}*.\n` +
-                                `Latest row in that range is ${latestInRange.dateStr} with spend *$${latestInRange.value.toFixed(
-                                    2
-                                )}*.`;
-                        } else {
-                            text =
-                                `📄 *Sheet:* ${file.name}\n` +
-                                `For *${label}* (${rangeStr}), total ad spend was *$${total.toFixed(
-                                    2
-                                )}* across *${days}* day(s).\n` +
-                                `Most recent date in that range is ${latestInRange.dateStr} with spend *$${latestInRange.value.toFixed(
-                                    2
-                                )}*.`;
-                        }
-                    } else {
-                        text =
-                            `📄 *Sheet:* ${file.name}\n` +
-                            `I couldn't find any ad spend data for *${label}* (${rangeStr}).\n` +
-                            (latestOverall
-                                ? `The latest available data in the sheet is ${latestOverall.dateStr} with spend *$${latestOverall.value?.toFixed(
-                                    2
-                                ) || "N/A"}*.`
-                                : "I couldn't find any valid ad spend data at all.");
-                    }
-
-                    await axios.post(responseUrl, {
-                        response_type: "ephemeral",
-                        text,
-                    });
-                    return;
-                }
-
-                // If it's not a "spend" question, you can still fall back to OpenAI or a generic summary here.
                 await axios.post(responseUrl, {
                     response_type: "ephemeral",
-                    text:
-                        `📄 *Sheet:* ${file.name}\n` +
-                        `I can see ${values.length - 1} data row(s). Right now I'm optimized for questions about ad spend (yesterday, last 7 days, last month).`,
+                    text: msg.content
                 });
-            } catch (err) {
-                console.error("Error handling Drive question:", err);
-                await axios.post(responseUrl, {
-                    response_type: "ephemeral",
-                    text:
-                        "⚠️ Something went wrong while talking to Google Drive. Check the logs in Render.",
-                });
+
+                break;
             }
-        })();
 
-        return;
+            // Handle tool call
+            const toolCall = msg.tool_calls[0];
+            const toolResult = await handleToolCall(toolCall);
+
+            // Push tool result
+            messages.push({
+                role: "assistant",
+                tool_call_id: toolCall.id,
+                content: JSON.stringify(toolResult)
+            });
+        }
+    } catch (err) {
+        await axios.post(responseUrl, {
+            response_type: "ephemeral",
+            text: "❌ Error: " + err.message
+        });
     }
-
-    // 3) Fallback: echo
-    return res.json({
-        response_type: "ephemeral",
-        text: `Got it, ${userName}. You said: "${userText}" 👌`,
-    });
 });
 
 // Test Google Auth endpoint
