@@ -4,7 +4,7 @@ const { google } = require("googleapis");
 const { runAgent, SYSTEM_PROMPT } = require("./aiAgent");
 const { handleToolCall } = require("./toolHandlers");
 const { getHistory, appendToHistory } = require("./memoryStore");
-const { getBoardItems, getBoardDetails } = require("./mondayClient");
+const { searchBoardsByName } = require("./mondayClient");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -79,15 +79,17 @@ app.post("/slack/events", async (req, res) => {
     if (body.type === "event_callback") {
         const event = body.event;
 
-        // 🚫 Ignore any messages originating from bots (including this bot)
-        if (event.subtype === "bot_message") return res.sendStatus(200);
-        if (event.bot_id) return res.sendStatus(200);
+        // Ignore bot messages (avoid loops)
+        if (event.subtype === "bot_message") {
+            return res.sendStatus(200);
+        }
 
-        // 🚫 Ignore messages sent by THIS bot user
+        // Ignore if the sender is the bot itself
         const botUserId = body.authorizations?.[0]?.user_id;
-        if (event.user === botUserId) return res.sendStatus(200);
+        if (event.user === botUserId) {
+            return res.sendStatus(200);
+        }
 
-        // We only care about DMs to the bot or @mentions for now
         const isDM = event.channel_type === "im";
         const isMention = event.type === "app_mention";
 
@@ -123,7 +125,7 @@ app.post("/slack/events", async (req, res) => {
                 const result = await runAgent(messages);
                 const msg = result.choices[0].message;
 
-                // Final answer
+                // If AI returns a final answer (no tools)
                 if (!msg.tool_calls?.length) {
                     // unwrap JSON like {"text":"..."} if model uses respond tool
                     let finalContent = msg.content;
@@ -151,7 +153,7 @@ app.post("/slack/events", async (req, res) => {
                     break;
                 }
 
-                // Tool call
+                // Handle board queries
                 const toolCall = msg.tool_calls[0];
                 const toolName = toolCall.function?.name;
                 let args = {};
@@ -161,30 +163,75 @@ app.post("/slack/events", async (req, res) => {
                         : {};
                 } catch (_) { }
 
-                // Fetch Monday board data if requested
+                // Fetch board data from Monday if requested
                 if (toolName === "get_board_items") {
-                    const boardId = args.boardId;
-                    const boardItems = await getBoardItems(boardId);
-                    const itemNames = boardItems.items.map(item => item.name).join("\n");
-                    messages.push({
-                        role: "assistant",
-                        tool_call_id: toolCall.id,
-                        content: `Here are the items in your board:\n${itemNames}`,
-                    });
+                    const boardName = args.boardName;
+                    const boards = await searchBoardsByName(boardName);
 
-                    await axios.post(
-                        "https://slack.com/api/chat.postMessage",
-                        {
-                            channel: channelId,
-                            text: `Here are the items in your board:\n${itemNames}`,
-                        },
-                        {
-                            headers: {
-                                Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
-                                "Content-Type": "application/json",
+                    if (boards.length === 0) {
+                        await axios.post(
+                            "https://slack.com/api/chat.postMessage",
+                            {
+                                channel: channelId,
+                                text: `I couldn't find any board named "${boardName}" in your Monday.com account.`,
                             },
-                        }
-                    );
+                            {
+                                headers: {
+                                    Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+                                    "Content-Type": "application/json",
+                                },
+                            }
+                        );
+                        break;
+                    }
+
+                    // If there's only one match, fetch its items
+                    if (boards.length === 1) {
+                        const boardId = boards[0].id;
+                        const boardItems = await getBoardItems(boardId);
+                        const itemNames = boardItems.items.map(item => item.name).join("\n");
+                        messages.push({
+                            role: "assistant",
+                            tool_call_id: toolCall.id,
+                            content: `Here are the items in your board:\n${itemNames}`,
+                        });
+
+                        await axios.post(
+                            "https://slack.com/api/chat.postMessage",
+                            {
+                                channel: channelId,
+                                text: `Here are the items in your board:\n${itemNames}`,
+                            },
+                            {
+                                headers: {
+                                    Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+                                    "Content-Type": "application/json",
+                                },
+                            }
+                        );
+
+                        break;
+                    } else {
+                        // If there are multiple matches, ask the user to choose
+                        let reply = "I found multiple boards matching your request. Which one would you like?\n";
+                        boards.forEach((board, index) => {
+                            reply += `${index + 1}. ${board.name}\n`;
+                        });
+
+                        await axios.post(
+                            "https://slack.com/api/chat.postMessage",
+                            {
+                                channel: channelId,
+                                text: reply,
+                            },
+                            {
+                                headers: {
+                                    Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+                                    "Content-Type": "application/json",
+                                },
+                            }
+                        );
+                    }
 
                     break;
                 }
@@ -197,16 +244,17 @@ app.post("/slack/events", async (req, res) => {
                 messages.push({
                     role: "assistant",
                     tool_call_id: toolCall.id,
-                    content: JSON.stringify(toolOutput)
+                    content: JSON.stringify(toolOutput),
                 });
 
                 appendToHistory(userId, {
                     role: "assistant",
-                    content: `Used tool: ${toolName}.`
+                    content: `Used tool: ${toolName}.`,
                 });
             }
         } catch (err) {
-            console.error("DM/mention agent error:", err);
+            console.error("Agent error:", err);
+
             await axios.post(
                 "https://slack.com/api/chat.postMessage",
                 {

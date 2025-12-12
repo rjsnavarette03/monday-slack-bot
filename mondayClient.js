@@ -25,43 +25,26 @@ async function makeMondayApiRequest(query) {
 	}
 }
 
-// Function to fetch board details
-async function getBoardDetails(boardId) {
+// Function to search boards by name
+async function searchBoardsByName(boardName) {
 	const query = `
     query {
-      boards(ids: [${boardId}]) {
+      boards (limit: 50) {
+        id
         name
-        columns {
-          title
-          id
-        }
-        items {
-          id
-          name
-          column_values {
-            text
-            title
-          }
-        }
       }
     }
   `;
-	return await makeMondayApiRequest(query);
+
+	const result = await makeMondayApiRequest(query);
+	if (!result) return null;
+
+	// Filter boards by name
+	const matchingBoards = result.boards.filter(board =>
+		board.name.toLowerCase().includes(boardName.toLowerCase())
+	);
+
+	return matchingBoards;
 }
 
-// Example: Fetch all tasks from a board
-async function getBoardItems(boardId) {
-	const query = `
-    query {
-      boards(ids: [${boardId}]) {
-        items {
-          id
-          name
-        }
-      }
-    }
-  `;
-	return await makeMondayApiRequest(query);
-}
-
-module.exports = { getBoardDetails, getBoardItems };
+module.exports = { searchBoardsByName };
