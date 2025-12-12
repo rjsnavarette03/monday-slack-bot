@@ -67,6 +67,7 @@ app.get("/auth/google/callback", async (req, res) => {
 });
 
 // Slack Events endpoint (for DMs / mentions)
+// Inside the /slack/events route
 app.post("/slack/events", async (req, res) => {
     const body = req.body;
 
@@ -153,7 +154,7 @@ app.post("/slack/events", async (req, res) => {
                     break;
                 }
 
-                // Check if the query is related to Monday (searching boards)
+                // Handle board queries
                 const toolCall = msg.tool_calls[0];
                 const toolName = toolCall.function?.name;
                 let args = {};
@@ -168,12 +169,13 @@ app.post("/slack/events", async (req, res) => {
                     const boardName = args.boardName;
                     const boards = await searchBoardsByName(boardName);
 
-                    if (boards.length === 0) {
+                    if (boards.error) {
+                        // If no boards were found, return the error message
                         await axios.post(
                             "https://slack.com/api/chat.postMessage",
                             {
                                 channel: channelId,
-                                text: `I couldn't find any board named "${boardName}" in your Monday.com account.`,
+                                text: boards.error,  // Error message returned from searchBoardsByName
                             },
                             {
                                 headers: {

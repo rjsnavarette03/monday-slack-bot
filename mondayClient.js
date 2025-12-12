@@ -39,10 +39,15 @@ async function searchBoardsByName(boardName) {
 	const result = await makeMondayApiRequest(query);
 	if (!result) return null;
 
-	// Filter boards by name
+	// Filter boards by name (case-insensitive partial match)
 	const matchingBoards = result.boards.filter(board =>
 		board.name.toLowerCase().includes(boardName.toLowerCase())
 	);
+
+	// If no exact match found, suggest fuzzy matches or give helpful feedback
+	if (matchingBoards.length === 0) {
+		return { error: `No board found named "${boardName}".` };
+	}
 
 	return matchingBoards;
 }
