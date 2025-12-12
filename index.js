@@ -153,7 +153,7 @@ app.post("/slack/events", async (req, res) => {
                     break;
                 }
 
-                // Handle board queries
+                // Check if the query is related to Monday (searching boards)
                 const toolCall = msg.tool_calls[0];
                 const toolName = toolCall.function?.name;
                 let args = {};
@@ -163,7 +163,7 @@ app.post("/slack/events", async (req, res) => {
                         : {};
                 } catch (_) { }
 
-                // Fetch board data from Monday if requested
+                // If the user is asking about a Monday board
                 if (toolName === "get_board_items") {
                     const boardName = args.boardName;
                     const boards = await searchBoardsByName(boardName);
@@ -236,6 +236,7 @@ app.post("/slack/events", async (req, res) => {
                     break;
                 }
 
+                // Handle other tools (e.g., Google Drive)
                 const toolOutput = await handleToolCall(
                     { name: toolName, arguments: args },
                     userId

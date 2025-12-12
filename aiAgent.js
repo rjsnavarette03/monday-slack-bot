@@ -73,6 +73,11 @@ If the user asks about a Monday board, always:
 4. If there are multiple boards, ask the user to choose one by its index or name.
 
 ALWAYS make sure to use the data returned from Monday.com via "get_board_items", never guess task names.
+
+When the user mentions a board, look for keywords like "board", "Monday", or specific board names (e.g., "Website & Blog Projects").
+If the user is asking for a **Monday.com board**, **always call the "searchBoardsByName" function** to search for the board in Monday.com.
+Do not call "search_drive" for Monday boards — that is only for Google Drive.
+If the user asks for files from Google Drive, use "search_drive".
 `;
 
 // Run the agent with tool calling
