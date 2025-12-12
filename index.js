@@ -5,6 +5,7 @@ const { runAgent, SYSTEM_PROMPT } = require("./aiAgent");
 const { handleToolCall } = require("./toolHandlers");
 const { getHistory, appendToHistory } = require("./memoryStore");
 const { searchBoardsByName } = require("./mondayClient");
+const { findInDrive } = require("./driveTools");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -154,7 +155,7 @@ app.post("/slack/events", async (req, res) => {
                     break;
                 }
 
-                // Handle board queries
+                // Check if the query is related to Monday (searching boards)
                 const toolCall = msg.tool_calls[0];
                 const toolName = toolCall.function?.name;
                 let args = {};
@@ -167,6 +168,8 @@ app.post("/slack/events", async (req, res) => {
                 // If the user is asking about a Monday board
                 if (toolName === "get_board_items") {
                     const boardName = args.boardName;
+
+                    // Call Monday API to search for boards
                     const boards = await searchBoardsByName(boardName);
 
                     if (boards.error) {
