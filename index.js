@@ -4,6 +4,7 @@ const { google } = require("googleapis");
 const { runAgent, SYSTEM_PROMPT } = require("./aiAgent");
 const { handleToolCall } = require("./toolHandlers");
 const { getHistory, appendToHistory } = require("./memoryStore");
+const { getBoardItems, getBoardDetails } = require("./mondayClient");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -160,6 +161,34 @@ app.post("/slack/events", async (req, res) => {
                         : {};
                 } catch (_) { }
 
+                // Fetch Monday board data if requested
+                if (toolName === "get_board_items") {
+                    const boardId = args.boardId;
+                    const boardItems = await getBoardItems(boardId);
+                    const itemNames = boardItems.items.map(item => item.name).join("\n");
+                    messages.push({
+                        role: "assistant",
+                        tool_call_id: toolCall.id,
+                        content: `Here are the items in your board:\n${itemNames}`,
+                    });
+
+                    await axios.post(
+                        "https://slack.com/api/chat.postMessage",
+                        {
+                            channel: channelId,
+                            text: `Here are the items in your board:\n${itemNames}`,
+                        },
+                        {
+                            headers: {
+                                Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+                                "Content-Type": "application/json",
+                            },
+                        }
+                    );
+
+                    break;
+                }
+
                 const toolOutput = await handleToolCall(
                     { name: toolName, arguments: args },
                     userId
@@ -204,120 +233,6 @@ app.post("/slack/events", async (req, res) => {
 app.get("/", (req, res) => {
     res.send("Slack → Render backend is running ✅");
 });
-
-// Slash command handler
-// app.post("/slack/command", async (req, res) => {
-//     const userText = req.body.text || "";
-//     const userId = req.body.user_id;
-//     const responseUrl = req.body.response_url;
-
-//     // Prevent Slack request timeout
-//     res.json({
-//         response_type: "ephemeral",
-//         text: "🤖 Working on it..."
-//     });
-
-//     try {
-//         // Load user conversation memory
-//         let history = getHistory(userId);
-
-//         // Record new user message
-//         appendToHistory(userId, { role: "user", content: userText });
-
-//         // Build messages array for OpenAI
-//         let messages = [
-//             { role: "system", content: SYSTEM_PROMPT },
-//             ...history
-//         ];
-
-//         while (true) {
-//             const result = await runAgent(messages);
-//             const msg = result.choices[0].message;
-
-//             // CASE 1 — No tools requested → final answer
-//             if (!msg.tool_calls?.length) {
-
-//                 // Clean up JSON-like assistant messages
-//                 let finalContent = msg.content;
-
-//                 try {
-//                     const parsed = JSON.parse(finalContent);
-//                     if (parsed?.text) {
-//                         finalContent = parsed.text;
-//                     }
-//                 } catch (_) {
-//                     // It's fine — message was not JSON
-//                 }
-
-//                 // Store ONLY natural language responses in memory
-//                 appendToHistory(userId, { role: "assistant", content: finalContent });
-
-//                 await axios.post(responseUrl, {
-//                     response_type: "ephemeral",
-//                     text: finalContent
-//                 });
-
-//                 break;
-//             }
-
-//             // CASE 2 — Tool call received
-//             const toolCall = msg.tool_calls[0];
-
-//             // Extract tool name
-//             const toolName = toolCall.function?.name;
-
-//             if (!toolName) {
-//                 console.error("❌ Tool call missing function.name:", toolCall);
-
-//                 await axios.post(responseUrl, {
-//                     response_type: "ephemeral",
-//                     text: "❌ AI attempted a tool call but did not specify a tool name."
-//                 });
-
-//                 break;
-//             }
-
-//             // Extract & parse arguments
-//             let args = {};
-//             try {
-//                 args = toolCall.function.arguments
-//                     ? JSON.parse(toolCall.function.arguments)
-//                     : {};
-//             } catch (err) {
-//                 console.error("❌ Failed to parse tool arguments:", toolCall.function.arguments);
-//             }
-
-//             // Execute the tool
-//             const toolResult = await handleToolCall({
-//                 name: toolName,
-//                 arguments: args
-//             });
-
-//             // Add tool result into next OpenAI call
-//             messages.push({
-//                 role: "assistant",
-//                 tool_call_id: toolCall.id,
-//                 content: JSON.stringify(toolResult)
-//             });
-
-//             // Add to memory
-//             appendToHistory(userId, {
-//                 role: "assistant",
-//                 content: `Used tool: ${toolName}.`
-//             });
-
-//             // And loop again (OpenAI may call another tool)
-//         }
-
-//     } catch (err) {
-//         console.error("Agent error:", err);
-
-//         await axios.post(responseUrl, {
-//             response_type: "ephemeral",
-//             text: "❌ Error: " + err.message
-//         });
-//     }
-// });
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

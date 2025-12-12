@@ -63,6 +63,16 @@ If the file is a **Google Drive shortcut**, resolve it to the target file before
 If you cannot find a file or if the file type is not compatible (e.g., not a Google Sheet or Google Doc), provide a helpful error message to the user, such as:
 - "This file is not a Google Sheet, so I cannot open it."
 - "This file may no longer exist, or I cannot access it."
+
+When you use "get_board_items", you will receive a list of items from a Monday.com board.
+
+If the user asks about a Monday board, always:
+1. Use "get_board_items(boardId)" to fetch the tasks/items.
+2. Use the item names to construct a useful reply for the user.
+3. Respond with a list or a summary of the items.
+4. If there are multiple boards, ask the user to choose one by its index or name.
+
+ALWAYS make sure to use the data returned from Monday.com via "get_board_items", never guess task names.
 `;
 
 // Run the agent with tool calling

@@ -1,75 +1,67 @@
 // mondayClient.js
-const axios = require("axios");
+const axios = require('axios');
 
-const MONDAY_API_URL = "https://api.monday.com/v2";
+// Set up the Monday API endpoint and token
+const MONDAY_API_URL = 'https://api.monday.com/v2/';
+const MONDAY_API_KEY = process.env.MONDAY_API_KEY;
 
-async function queryMonday(query, variables = {}) {
-    const apiKey = process.env.MONDAY_API_KEY;
-    if (!apiKey) {
-        throw new Error("MONDAY_API_KEY is not set");
-    }
-
-    const res = await axios.post(
-        MONDAY_API_URL,
-        { query, variables },
-        {
-            headers: {
-                Authorization: apiKey,
-                "Content-Type": "application/json",
-            },
-        }
-    );
-
-    if (res.data.errors) {
-        console.error("Monday API errors:", res.data.errors);
-        throw new Error("Error from monday.com API");
-    }
-
-    return res.data.data;
+// Function to make the API request
+async function makeMondayApiRequest(query) {
+	try {
+		const response = await axios.post(
+			MONDAY_API_URL,
+			{ query },
+			{
+				headers: {
+					'Authorization': MONDAY_API_KEY,
+					'Content-Type': 'application/json',
+				},
+			}
+		);
+		return response.data.data;
+	} catch (error) {
+		console.error('Error making Monday API request:', error);
+		return null;
+	}
 }
 
-// Get a simple summary of a board: name, number of items, a few examples
-async function getBoardSummary(boardId) {
-    const query = `
-    query ($boardId: [Int]) {
-      boards (ids: $boardId) {
-        id
+// Function to fetch board details
+async function getBoardDetails(boardId) {
+	const query = `
+    query {
+      boards(ids: [${boardId}]) {
         name
-        items_page(limit: 50) {
-          items {
-            id
-            name
-            column_values {
-              id
-              text
-            }
+        columns {
+          title
+          id
+        }
+        items {
+          id
+          name
+          column_values {
+            text
+            title
           }
         }
       }
     }
   `;
-
-    const data = await queryMonday(query, { boardId });
-
-    const board = data.boards && data.boards[0];
-    if (!board) {
-        return { text: `❌ No board found with ID ${boardId}.` };
-    }
-
-    const items = (board.items_page && board.items_page.items) || [];
-    const totalItems = items.length;
-
-    const exampleItems =
-        items
-            .slice(0, 5)
-            .map((item) => `• ${item.name} (ID: ${item.id})`)
-            .join("\n") || "No items found on this board.";
-
-    return {
-        boardName: board.name,
-        totalItems,
-        exampleItems,
-    };
+	return await makeMondayApiRequest(query);
 }
 
-module.exports = { getBoardSummary };
+// Example: Fetch all tasks from a board
+async function getBoardItems(boardId) {
+	const query = `
+    query {
+      boards(ids: [${boardId}]) {
+        items {
+          id
+          name
+        }
+      }
+    }
+  `;
+	return await makeMondayApiRequest(query);
+}
+
+module.exports = { getBoardDetails, getBoardItems };
